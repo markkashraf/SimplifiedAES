@@ -50,7 +50,7 @@ Please enter operation:
 To build the program, use the gcc compiler or any other compiler of your choice.
 
 ```bash
-gcc saes_1900156.c aes.exe
+gcc main.c aes.exe
 ```
 
 ## Dependencies
