@@ -52,7 +52,11 @@ To build the program, use the gcc compiler or any other compiler of your choice.
 ```bash
 gcc main.c aes.exe
 ```
+or you can use the provided makefile by just makes
 
+```bash
+make
+```
 ## Dependencies
 
 The program has no external dependencies and no external libraries has been used.
