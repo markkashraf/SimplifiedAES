@@ -4,10 +4,23 @@
 #include <string.h>
 
 
+//############################################MACROS###########################################
+#define uint32_t unsigned int
 #define uint16_t unsigned short int
 #define uint8_t unsigned char
+#define TEST_KEY 0x4AF5
+
+// shift rows of nibble
+// can be simply done by exchanging the locations of the last 2nd, 4th nibbles
+//shift_rows(DF1A) = DA1F
+#define shift_rows(r) ((r & 0x0f00) >> 8 | (r & 0x000f) << 8 | (r & 0xf0f0))
+// can be simply done by exchanging the locations of the last 1st, 2nd nibbles
+#define  shift_rows_8bit(r) ((r & 0xf0) >> 4 | (r & 0x0f) << 4)
+//XOR a 16-bit round key into a 16-bit state.
+#define add_round_key(x, y) (x^y)
 
 
+//############################################CONSTANTS#########################################
 uint8_t const SBOX[]={0x09, 0x04, 0x0a, 0x0b,
                       0x0d, 0x01, 0x08, 0x05,
                       0x06, 0x02, 0x00, 0x03,
@@ -20,31 +33,31 @@ uint8_t const INVERSE_SBOX[]={0x0a, 0x05, 0x09, 0x0b,
 };
 
 uint8_t const RCON[]={0x80, 0x00, 0x30};
-uint16_t key=0x4af5;
-uint16_t ciphertext,plaintext,decoded_ciphertext,skey[3]={0, 0, 0};
-uint8_t round_key[6]={0, 0, 0, 0, 0, 0};
-
 uint8_t const MIX_COLUMNS[2][2]={{1, 4}, {4, 1}};
 uint8_t const INVERSE_MIX_COLUMNS[2][2]={{9, 2}, {2, 9}};
 
 
 
-//substitute nibbles 16-bit, splits the input into 4 nibbles and-
-//and gets the corresponding nibble from the SBOX
+//############################################VARIABLES#########################################
+uint16_t key = TEST_KEY;
+uint16_t ciphertext, plaintext, decoded_ciphertext, round_key[3]={0, 0, 0};
+uint8_t  round_key_gen[6]={0, 0, 0, 0, 0, 0};
 
 
-uint8_t substitute_nibble(uint8_t sub){
+
+
+//############################################ Substitution #########################################
+// used for key expansion
+uint8_t substitute_nibble_8bit(uint8_t sub){
     uint8_t x1,x2;
     x1=(sub & 0xf0) >> 4;
     x2=(sub & 0x0f);
     return (SBOX[x1] << 4 | SBOX[x2]);
 }
 
-uint8_t shift_rows_8bit(uint8_t r){
-    return ((r & 0xf0) >> 4 | (r & 0x0f) << 4);
-}
-
-uint16_t substitute_nibble_8bit(uint16_t x, uint8_t const s_box[]){
+//substitute nibbles 16-bit, splits the input into 4 nibbles and-
+//and gets the corresponding nibble from the SBOX
+uint16_t substitute_nibble_16bit(uint16_t x, uint8_t const s_box[]){
     uint16_t x1,x2,x3,x4;
     x1=(0xf000 & x) >> 12;
     x2=(0x0f00 & x) >> 8;
@@ -52,45 +65,30 @@ uint16_t substitute_nibble_8bit(uint16_t x, uint8_t const s_box[]){
     x4=(0x000f & x);
     return ((s_box[x1] << 12) | (s_box[x2] << 8) | (s_box[x3] << 4) | (s_box[x4]));
 }
-// shift rows of nibble
-// can be simply done by exchanging the locations of the last 2nd, 4th nibbles
-//shift_rows(DF1A) = DA1F
-uint16_t shift_rows(uint16_t r){
-    return ((r & 0x0f00) >> 8 | (r & 0x000f) << 8 | (r & 0xf0f0));
-}
-//XOR a 16-bit round key into a 16-bit state.
-uint16_t add_round_key(uint16_t m, uint16_t k){
-    return (m^k);
-}
 
 
+
+//############################################ Key Generation #########################################
 void expand_key(){
-    round_key[0]=(0xff00 & key) >> 8;
-    round_key[1]=(0x00ff & key);
+    round_key_gen[0]=(0xff00 & key) >> 8;
+    round_key_gen[1]=(0x00ff & key);
     int i;
     for(i=2;i<5;i=i+2){
-        round_key[i]= round_key[i - 2] ^ RCON[i - 2] ^ substitute_nibble(shift_rows_8bit(round_key[i - 1]));
-        round_key[i + 1]= round_key[i] ^ round_key[i - 1];
+        round_key_gen[i]= round_key_gen[i - 2] ^ RCON[i - 2] ^ substitute_nibble_8bit(shift_rows_8bit(round_key_gen[i - 1]));
+        round_key_gen[i + 1]= round_key_gen[i] ^ round_key_gen[i - 1];
     }
 }
 
 //generating round keys
 void get_round_key(){
-    skey[0]=(round_key[0] << 8 | round_key[1]);
-    skey[1]=(round_key[2] << 8 | round_key[3]);
-    skey[2]=(round_key[4] << 8 | round_key[5]);
+    round_key[0]=(round_key_gen[0] << 8 | round_key_gen[1]);
+    round_key[1]=(round_key_gen[2] << 8 | round_key_gen[3]);
+    round_key[2]=(round_key_gen[4] << 8 | round_key_gen[5]);
 }
 
 
 
-void round0(){
-    ciphertext= add_round_key(plaintext, skey[0]);
-}
-
-void d_round0(){
-    decoded_ciphertext= add_round_key(ciphertext, skey[2]);
-}
-
+//########################################################## MIX COLUMNS ####################################################
 
 //polynomial multiplication in GF(2^4)
 uint16_t GF_2_4_multiply(uint16_t x1, uint16_t x2){
@@ -102,10 +100,10 @@ uint16_t GF_2_4_multiply(uint16_t x1, uint16_t x2){
         i= i + 1;
     }
 
-    uint16_t shift=0;
+    uint32_t shift;
     while(res > 15){
-        shift= ceil(log(res + 1) / log(2)) - ceil(log(0x13) / log(2));
-        res= res ^ (0x13 << shift);
+        shift = (int)(ceil( log(res + 1) / log(2)) - ceil( log(0x13) / log(2)));
+        res = res ^ (0x13 << shift);
     }
     return res;
 }
@@ -118,51 +116,39 @@ uint16_t mix_columns(uint16_t c, unsigned const char m[][2]){
     s[3]=(0x000f & c);
 
     st[0]= GF_2_4_multiply(m[0][0], s[0]) ^ GF_2_4_multiply(m[0][1], s[1]);
-
     st[1]= GF_2_4_multiply(m[0][1], s[0]) ^ GF_2_4_multiply(m[0][0], s[1]);
-
     st[2]= GF_2_4_multiply(m[1][1], s[2]) ^ GF_2_4_multiply(m[1][0], s[3]);
-
     st[3]= GF_2_4_multiply(m[1][0], s[2]) ^ GF_2_4_multiply(m[1][1], s[3]);
 
     return ((st[0]<<12) | (st[1]<<8) | (st[2]<<4) | (st[3]));
 }
-//round1
-void round1(){
-    ciphertext = substitute_nibble_8bit(ciphertext, SBOX);
+
+
+void encode(){
+    //Adding round key
+    ciphertext = add_round_key(plaintext, round_key[0]);
+    //Round 1
+    ciphertext = substitute_nibble_16bit(ciphertext, SBOX);
     ciphertext = shift_rows(ciphertext);
     ciphertext = mix_columns(ciphertext, MIX_COLUMNS);
-    ciphertext = add_round_key(ciphertext, skey[1]);
-}
-
-void d_round1(){
-    decoded_ciphertext= substitute_nibble_8bit(decoded_ciphertext, INVERSE_SBOX);
-    decoded_ciphertext= shift_rows(decoded_ciphertext);
-    decoded_ciphertext= add_round_key(decoded_ciphertext, skey[1]);
-    decoded_ciphertext= mix_columns(decoded_ciphertext, INVERSE_MIX_COLUMNS);
-}
-//final round
-void round2(){
-    ciphertext= substitute_nibble_8bit(ciphertext, SBOX);
+    ciphertext = add_round_key(ciphertext, round_key[1]);
+    //Round 2
+    ciphertext= substitute_nibble_16bit(ciphertext, SBOX);
     ciphertext= shift_rows(ciphertext);
-    ciphertext= add_round_key(ciphertext, skey[2]);
-
-}
-
-void d_round2(){
-    decoded_ciphertext = substitute_nibble_8bit(decoded_ciphertext, INVERSE_SBOX);
-    decoded_ciphertext = shift_rows(decoded_ciphertext);
-    decoded_ciphertext = add_round_key(decoded_ciphertext, skey[0]);
-}
-void encode(){
-    round0();
-    round1();
-    round2();
+    ciphertext= add_round_key(ciphertext, round_key[2]);
 }
 void decode(){
-    d_round0();
-    d_round1();
-    d_round2();
+    //Adding round key
+    decoded_ciphertext= add_round_key(ciphertext, round_key[2]);
+    //Round 1
+    decoded_ciphertext = substitute_nibble_16bit(decoded_ciphertext, INVERSE_SBOX);
+    decoded_ciphertext = shift_rows(decoded_ciphertext);
+    decoded_ciphertext = add_round_key(decoded_ciphertext, round_key[1]);
+    decoded_ciphertext = mix_columns(decoded_ciphertext, INVERSE_MIX_COLUMNS);
+    //Round 2
+    decoded_ciphertext = substitute_nibble_16bit(decoded_ciphertext, INVERSE_SBOX);
+    decoded_ciphertext = shift_rows(decoded_ciphertext);
+    decoded_ciphertext = add_round_key(decoded_ciphertext, round_key[0]);
 }
 
 
@@ -176,16 +162,16 @@ int main(int argc, char* argv[]){
         if(mode == 1)
         {
             printf("\nEnter key (in hexadecimal):> 0x");
-            scanf("%x", &key);
+            scanf("%hx", &key);
             printf("Enter plaintext (in hexadecimal):> 0x");
-            scanf("%x", &plaintext);
+            scanf("%hx", &plaintext);
         }
         if (mode == 2)
         {
             printf("\nEnter key (in hexadecimal):> 0x");
-            scanf("%x", &key);
+            scanf("%hx", &key);
             printf("Enter ciphertext (in hexadecimal):> 0x");
-            scanf("%x", &ciphertext);
+            scanf("%hx", &ciphertext);
 
         }
 
@@ -205,13 +191,13 @@ int main(int argc, char* argv[]){
         }
         else
         {
-            printf("Error: wrong parameter format, please use \"./saes_1900156 ENC KEY PLAINTEXT)\" or \"saes_1900156 DEC KEY CIPHERTEXT\" to use the command-line mode.");
+            printf("Error: wrong parameter format, please use \"./saes_1900156 ENC KEY PLAINTEXT\" or \"saes_1900156 DEC KEY CIPHERTEXT\" to use the command-line mode.");
         }
 
     }
     else
     {
-        printf("Error: wrong parameter format, please use \"./saes_1900156 ENC KEY PLAINTEXT)\" or \"saes_1900156 DEC KEY CIPHERTEXT\" to use the command-line mode.");
+        printf("Error: Wrong number of parameters, please use \"./saes_1900156 ENC KEY PLAINTEXT\" or \"saes_1900156 DEC KEY CIPHERTEXT\" to use the command-line mode.");
         return 0;
     }
 
@@ -221,14 +207,14 @@ int main(int argc, char* argv[]){
         expand_key();
         get_round_key();
         encode();
-        printf("\nciphertext: 0x%X\n", ciphertext);
+        printf("\n0x%X\n", ciphertext);
     }
     else if (mode == 2)
     {
         expand_key();
         get_round_key();
         decode();
-        printf("\nplaintext: 0x%X\n", decoded_ciphertext);
+        printf("\n0x%X\n", decoded_ciphertext);
 
     }
 
